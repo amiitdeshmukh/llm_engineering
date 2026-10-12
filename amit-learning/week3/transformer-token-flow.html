@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>See one token pass through Gemma 3</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #eaf1ff; background: #0b1020; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    main { width: min(840px, calc(100% - 28px)); margin: 28px auto; }
+    .topline { color: #75ddcb; font-size: .78rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    h1 { margin: 6px 0 5px; font-size: clamp(1.65rem, 4vw, 2.4rem); letter-spacing: -.04em; }
+    .intro { color: #aebbd1; margin: 0 0 22px; line-height: 1.45; }
+    .switch { display: flex; gap: 7px; margin: 0 0 18px; }
+    .switch button, .controls button, .token-choice button { color: #eaf1ff; background: #1b2942; border: 1px solid #3b5070; border-radius: 9px; padding: 9px 13px; font-weight: 700; }
+    .switch button.active, .token-choice button.active { background: #174e49; border-color: #6ce2ce; }
+    button:hover, button:focus-visible { border-color: #6ce2ce; outline: none; }
+    button:disabled { opacity: .4; cursor: default; }
+    .card { border: 1px solid #30425f; border-radius: 18px; background: #111b2d; padding: 20px; box-shadow: 0 18px 45px #03081655; }
+    .path { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 20px; }
+    .path div { text-align: center; padding: 10px 5px; background: #1a2840; color: #aebbd1; border: 1px solid #344968; border-radius: 9px; font-size: .8rem; font-weight: 750; }
+    .path div.active { background: #1b5650; color: white; border-color: #6ce2ce; }
+    .path div.done { color: #9fe7da; }
+    .meta { color: #75ddcb; font-size: .82rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+    h2 { font-size: clamp(1.45rem, 3.5vw, 2rem); letter-spacing: -.035em; margin: 5px 0 7px; }
+    .explain { color: #d8e5f6; font-size: 1.06rem; line-height: 1.55; min-height: 52px; margin: 0; }
+    .scene { margin-top: 17px; background: #0d1626; border: 1px solid #2c405d; border-radius: 14px; min-height: 210px; padding: 20px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .flow { display: flex; align-items: center; justify-content: center; gap: 13px; flex-wrap: wrap; width: 100%; }
+    .block { border: 2px solid #5a82aa; border-radius: 12px; background: #1c3452; padding: 15px 14px; min-width: 118px; text-align: center; font-size: 1.1rem; font-weight: 800; animation: enter .35s ease-out both; }
+    .block small { display: block; margin-top: 5px; color: #c0d4ea; font-size: .72rem; font-weight: 600; }
+    .block.main { border-color: #6ce2ce; background: #13534c; box-shadow: 0 0 24px #28bfaa35; }
+    .block.gold { border-color: #ffd083; background: #554022; }
+    .arrow { color: #72dfce; font-size: 1.45rem; font-weight: 900; }
+    .attention-view { width: 100%; text-align: center; }
+    .sources { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+    .source { border: 1px solid #52749a; border-radius: 10px; padding: 9px 13px; background: #203753; font-weight: 750; min-width: 85px; }
+    .source.dim { opacity: .28; }
+    .source small { display: block; font-size: .7rem; color: #bcd0e7; font-weight: 500; }
+    .down { color: #71decb; font-size: 1.8rem; line-height: 1.35; }
+    .attention-view .block { display: inline-block; min-width: 210px; }
+    .caption { margin: 12px 0 0; color: #aebdd2; font-size: .87rem; }
+    .token-choice { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 15px; color: #b9c9df; font-size: .84rem; }
+    .token-choice[hidden] { display: none; }
+    .token-choice button { padding: 6px 10px; font-size: .82rem; }
+    .scrub { display: flex; align-items: center; gap: 12px; margin-top: 18px; color: #b9c9df; font-size: .86rem; }
+    .scrub input { flex: 1; min-width: 80px; accent-color: #6ce2ce; }
+    .scrub strong { color: #eaf1ff; white-space: nowrap; }
+    .controls { display: flex; gap: 8px; align-items: center; margin-top: 18px; }
+    .controls button { min-width: 82px; }
+    .controls #next { background: #6ce2ce; color: #082d2b; border-color: #6ce2ce; }
+    .counter { margin-left: auto; color: #aebbd1; font-size: .84rem; }
+    .foot { color: #93a8c3; font-size: .8rem; line-height: 1.5; margin: 12px 2px; }
+    @keyframes enter { from { opacity: .3; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+    @media (max-width: 580px) {
+      main { margin: 18px auto; }
+      .card { padding: 13px; }
+      .path div { font-size: .66rem; padding: 8px 3px; }
+      .scene { padding: 13px; min-height: 190px; }
+      .flow { gap: 7px; }
+      .block { min-width: 83px; font-size: .9rem; padding: 10px 8px; }
+      .arrow { font-size: 1.1rem; }
+      .switch button { flex: 1; padding: 9px 6px; font-size: .82rem; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topline">Interactive model path</div>
+    <h1>What happens to [42, 18, 71]?</h1>
+    <p class="intro">Press Next to move one calculation at a time. The same two calculations repeat in each of the 18 layers.</p>
+    <div class="switch" role="group" aria-label="Choose input or next token">
+      <button id="input-mode" class="active" aria-pressed="true">Input: 42, 18, 71</button>
+      <button id="next-mode" aria-pressed="false">Next token: 95</button>
+    </div>
+    <section class="card" aria-live="polite">
+      <div class="path" id="path" aria-label="Model path"></div>
+      <div class="meta" id="meta"></div>
+      <h2 id="title"></h2>
+      <p class="explain" id="explain"></p>
+      <div class="scene" id="scene"></div>
+      <div class="token-choice" id="token-choice"></div>
+      <div class="scrub"><label for="layer-slider">Jump to layer</label><input id="layer-slider" type="range" min="1" max="18" value="1"><strong id="layer-value">1 / 18</strong></div>
+      <div class="controls">
+        <button id="back">← Back</button>
+        <button id="next">Next →</button>
+        <button id="play">Play</button>
+      </div>
+    </section>
+    <p class="foot">Token IDs and selected outputs are examples. This page shows the computation path; it does not run the model or show its learned number values.</p>
+  </main>
+  <script>
+    const ids = [42, 18, 71];
+    const labels = ['Token IDs', 'Embeddings', '18 layers', 'Scores', 'Next ID'];
+    const lastStep = 40;
+    let step = 0;
+    let mode = 'input';
+    let focus = 2;
+    let timer = null;
+    const el = id => document.getElementById(id);
+    const block = (title, sub, cls = '') => `<div class="block ${cls}">${title}<small>${sub}</small></div>`;
+    const arrow = '<span class="arrow" aria-hidden="true">→</span>';
+    function category() { return step === 0 ? 0 : step === 1 ? 1 : step <= 37 ? 2 : step <= 39 ? 3 : 4; }
+    function currentLayer() { return step >= 2 && step <= 37 ? Math.floor((step - 2) / 2) + 1 : step < 2 ? 1 : 18; }
+    function isAttention() { return step >= 2 && step <= 37 && step % 2 === 0; }
+    function stop() { if (timer) clearInterval(timer); timer = null; el('play').textContent = 'Play'; }
+    function setMode(nextMode) { stop(); mode = nextMode; step = 0; focus = 2; render(); }
+    function attentionScene() {
+      const newToken = mode === 'next';
+      const available = newToken ? [42, 18, 71, 95] : ids;
+      const chosen = newToken ? 3 : focus;
+      const sources = available.map((id, index) => `<div class="source ${index > chosen ? 'dim' : ''}">${newToken && index < 3 ? 'Saved K/V' : 'ID ' + id}<small>${newToken && index < 3 ? 'ID ' + id : index > chosen ? 'not visible yet' : 'can be used'}</small></div>`).join('');
+      return `<div class="attention-view"><div class="sources">${sources}</div><div class="down">↓</div>${block('Attention for ID ' + available[chosen], 'combines allowed token values', 'main')}<p class="caption">Output projection + original input → 640 numbers.</p></div>`;
+    }
+    function render() {
+      const group = category();
+      const layer = currentLayer();
+      el('path').innerHTML = labels.map((label, i) => `<div class="${i === group ? 'active' : i < group ? 'done' : ''}">${label}</div>`).join('');
+      el('input-mode').classList.toggle('active', mode === 'input');
+      el('next-mode').classList.toggle('active', mode === 'next');
+      el('input-mode').setAttribute('aria-pressed', String(mode === 'input'));
+      el('next-mode').setAttribute('aria-pressed', String(mode === 'next'));
+      el('layer-slider').value = String(layer);
+      el('layer-value').textContent = layer + ' / 18';
+      el('token-choice').hidden = !isAttention() || mode === 'next';
+      el('token-choice').innerHTML = 'Follow ID: ' + ids.map((id, i) => `<button data-focus="${i}" class="${focus === i ? 'active' : ''}" aria-pressed="${focus === i}">${id}</button>`).join('');
+      const data = { meta: '', title: '', text: '', scene: '' };
+      if (step === 0) {
+        data.meta = 'Start';
+        data.title = mode === 'input' ? 'Three input token IDs' : 'One new token ID';
+        data.text = mode === 'input' ? 'The tokenizer has already turned the text into these three IDs.' : 'ID 95 was picked from the previous pass. Now the model processes this new ID.';
+        data.scene = mode === 'input' ? `<div class="flow">${ids.map(id => block('ID ' + id, 'one position')).join('')}</div>` : `<div class="flow">${block('ID 95', 'new position', 'main')}</div>`;
+      } else if (step === 1) {
+        data.meta = 'Embeddings';
+        data.title = 'Each ID becomes 640 numbers';
+        data.text = mode === 'input' ? 'The model looks up one learned 640-number row for each ID. There are three separate rows.' : 'The model looks up the 640-number row for ID 95.';
+        data.scene = mode === 'input' ? `<div class="flow">${block('42', 'ID')}${arrow}${block('640', 'numbers', 'main')}${block('18', 'ID')}${arrow}${block('640', 'numbers', 'main')}${block('71', 'ID')}${arrow}${block('640', 'numbers', 'main')}</div>` : `<div class="flow">${block('ID 95', 'token')}${arrow}${block('640 numbers', 'embedding', 'main')}</div>`;
+      } else if (step <= 37 && isAttention()) {
+        data.meta = 'Layer ' + layer + ' / 18 · first calculation';
+        data.title = 'Attention: use earlier tokens';
+        data.text = mode === 'input' ? `ID ${ids[focus]} can use ${ids.slice(0, focus + 1).join(', ')}. All three positions are processed in this pass; choose one to see its allowed inputs.` : 'ID 95 uses its own values and saved K/V from IDs 42, 18, and 71. Earlier positions do not run through the whole layer again.';
+        data.scene = attentionScene();
+      } else if (step <= 37) {
+        data.meta = 'Layer ' + layer + ' / 18 · second calculation';
+        data.title = 'MLP: change each token’s numbers';
+        data.text = 'For each position, learned weights change its numbers. The layer adds the original input and passes 640 numbers per position onward.';
+        data.scene = `<div class="flow">${block('640', 'numbers in')}${arrow}${block('2048', 'gate + up', 'main')}${arrow}${block('640', 'down + add input')}</div>`;
+      } else if (step === 38) {
+        data.meta = 'After layer 18';
+        data.title = 'Final normalization';
+        data.text = mode === 'input' ? 'Use the last input position, ID 71. Adjust the scale of its 640 numbers.' : 'Use the new position, ID 95. Adjust the scale of its 640 numbers.';
+        data.scene = `<div class="flow">${block('640', 'from layer 18')}${arrow}${block('RMSNorm', 'adjust scale', 'main')}${arrow}${block('640', 'still 640')}</div>`;
+      } else if (step === 39) {
+        data.meta = 'Scores';
+        data.title = 'Score every possible next ID';
+        data.text = 'The LM head uses the last position’s 640 numbers to produce 262,144 scores: one score for each possible token ID.';
+        data.scene = `<div class="flow">${block('640', 'final numbers')}${arrow}${block('LM head', 'learned weights', 'main')}${arrow}${block('262,144', 'scores')}</div>`;
+      } else {
+        data.meta = 'Next ID';
+        data.title = mode === 'input' ? 'Pick one ID: example 95' : 'Pick one ID: example 6';
+        data.text = 'Generation settings turn the scores into a choice. Append the chosen ID, then repeat the path for that new position.';
+        data.scene = `<div class="flow">${block('262,144', 'scores')}${arrow}${block('ID ' + (mode === 'input' ? 95 : 6), 'example choice', 'gold')}</div>`;
+      }
+      el('meta').textContent = data.meta;
+      el('title').textContent = data.title;
+      el('explain').textContent = data.text;
+      el('scene').innerHTML = data.scene;
+      el('back').disabled = step === 0;
+      el('next').disabled = step === lastStep;
+      document.querySelector('h1').textContent = mode === 'input' ? 'What happens to [42, 18, 71]?' : 'What happens to new token 95?';
+      document.querySelectorAll('[data-focus]').forEach(button => button.addEventListener('click', () => { focus = Number(button.dataset.focus); render(); }));
+    }
+    el('input-mode').addEventListener('click', () => setMode('input'));
+    el('next-mode').addEventListener('click', () => setMode('next'));
+    el('back').addEventListener('click', () => { stop(); step = Math.max(0, step - 1); render(); });
+    el('next').addEventListener('click', () => { stop(); step = Math.min(lastStep, step + 1); render(); });
+    el('layer-slider').addEventListener('input', event => { stop(); step = 2 + (Number(event.target.value) - 1) * 2; render(); });
+    el('play').addEventListener('click', () => {
+      if (timer) { stop(); return; }
+      if (step === lastStep) step = 0;
+      render();
+      el('play').textContent = 'Pause';
+      timer = setInterval(() => { step++; render(); if (step === lastStep) stop(); }, 800);
+    });
+    render();
+  </script>
+</body>
+</html>
