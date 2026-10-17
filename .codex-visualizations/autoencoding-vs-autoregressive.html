@@ -1,0 +1,265 @@
+<div id="llm-architecture-explainer">
+  <style>
+    #llm-architecture-explainer {
+      color: var(--foreground);
+      font-family: inherit;
+      display: grid;
+      gap: 18px;
+    }
+    #llm-architecture-explainer .comparison {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+    #llm-architecture-explainer .lane {
+      min-width: 0;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+    #llm-architecture-explainer .lane h3,
+    #llm-architecture-explainer p {
+      margin: 0;
+    }
+    #llm-architecture-explainer .flow {
+      display: grid;
+      gap: 10px;
+    }
+    #llm-architecture-explainer .stage {
+      padding: 12px;
+      background: color-mix(in srgb, var(--muted) 55%, transparent);
+      color: var(--foreground);
+      border-radius: 10px;
+    }
+    #llm-architecture-explainer .stage-label {
+      display: block;
+      color: var(--muted-foreground);
+      margin-bottom: 8px;
+    }
+    #llm-architecture-explainer .tokens {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      align-items: center;
+      min-height: 34px;
+    }
+    #llm-architecture-explainer .token {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 2px 9px;
+      border-radius: 7px;
+      background: color-mix(in srgb, var(--viz-series-1) 15%, transparent);
+      color: var(--foreground);
+    }
+    #llm-architecture-explainer .token.target {
+      background: var(--primary);
+      color: var(--primary-foreground);
+    }
+    #llm-architecture-explainer .token.future {
+      background: color-mix(in srgb, var(--muted) 70%, transparent);
+      color: var(--muted-foreground);
+    }
+    #llm-architecture-explainer .arrow {
+      color: var(--muted-foreground);
+      text-align: center;
+    }
+    #llm-architecture-explainer .result {
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      background: color-mix(in srgb, var(--viz-series-2) 14%, transparent);
+      border-radius: 10px;
+    }
+    #llm-architecture-explainer .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      color: var(--muted-foreground);
+    }
+    #llm-architecture-explainer .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #llm-architecture-explainer .swatch {
+      width: 13px;
+      height: 13px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--viz-series-1) 15%, transparent);
+    }
+    #llm-architecture-explainer .swatch.target {
+      background: var(--primary);
+    }
+    #llm-architecture-explainer .swatch.future {
+      background: color-mix(in srgb, var(--muted) 70%, transparent);
+    }
+    #llm-architecture-explainer .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    #llm-architecture-explainer .step-status {
+      color: var(--muted-foreground);
+    }
+    #llm-architecture-explainer .output-map {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+    #llm-architecture-explainer .output-line {
+      display: grid;
+      grid-template-columns: minmax(92px, auto) 1fr;
+      gap: 10px;
+      align-items: center;
+      padding-block: 6px;
+    }
+    #llm-architecture-explainer .output-line strong {
+      font-weight: 500;
+    }
+    @media (max-width: 620px) {
+      #llm-architecture-explainer .comparison,
+      #llm-architecture-explainer .output-map {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+
+  <h2>What each model can see</h2>
+
+  <div class="comparison">
+    <section class="lane" aria-labelledby="encoder-heading">
+      <h3 id="encoder-heading">Auto-encoding · understand the input</h3>
+      <div class="flow">
+        <div class="stage">
+          <span class="stage-label text-small">One complete input</span>
+          <div class="tokens" aria-label="The movie was masked but the acting was excellent">
+            <span class="token">The</span>
+            <span class="token">movie</span>
+            <span class="token">was</span>
+            <span class="token target">[MASK]</span>
+            <span class="token">but</span>
+            <span class="token">the</span>
+            <span class="token">acting</span>
+            <span class="token">was</span>
+            <span class="token">excellent</span>
+          </div>
+        </div>
+        <div class="arrow" aria-hidden="true">all surrounding words ↓</div>
+        <div class="result"><strong>Understands: [MASK] is probably “bad”</strong></div>
+      </div>
+    </section>
+
+    <section class="lane" aria-labelledby="decoder-heading">
+      <h3 id="decoder-heading">Auto-regressive · continue the sequence</h3>
+      <div class="flow">
+        <div class="stage">
+          <span class="stage-label text-small">Only tokens to the left are visible</span>
+          <div class="tokens" id="ar-tokens" aria-live="polite"></div>
+        </div>
+        <div class="arrow" aria-hidden="true">predict one token ↓ then append it ↻</div>
+        <div class="result" id="ar-result" aria-live="polite"></div>
+      </div>
+      <div class="controls">
+        <button class="btn btn-primary" id="ar-next" type="button">Predict next token</button>
+        <button class="btn" id="ar-reset" type="button">Reset</button>
+        <span class="step-status text-small" id="ar-status"></span>
+      </div>
+    </section>
+  </div>
+
+  <div class="legend text-small" aria-label="Token legend">
+    <span><i class="swatch" aria-hidden="true"></i>visible context</span>
+    <span><i class="swatch target" aria-hidden="true"></i>target or newest prediction</span>
+    <span><i class="swatch future" aria-hidden="true"></i>not visible yet</span>
+  </div>
+
+  <hr>
+
+  <h2>What the learned representation is used for</h2>
+  <div class="output-map">
+    <section aria-labelledby="encoder-output-heading">
+      <h3 id="encoder-output-heading">Auto-encoding output</h3>
+      <div class="output-line"><strong>Classification</strong><span>positive / negative</span></div>
+      <div class="output-line"><strong>Token labels</strong><span>person / company / location</span></div>
+      <div class="output-line"><strong>Embedding</strong><span>[0.12, −0.48, 0.77, …]</span></div>
+    </section>
+    <section aria-labelledby="decoder-output-heading">
+      <h3 id="decoder-output-heading">Auto-regressive output</h3>
+      <div class="output-line"><strong>Chat</strong><span>a response, token by token</span></div>
+      <div class="output-line"><strong>Writing</strong><span>the next passage or document</span></div>
+      <div class="output-line"><strong>Code</strong><span>the next code tokens</span></div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.getElementById('llm-architecture-explainer');
+      const tokenBox = root.querySelector('#ar-tokens');
+      const result = root.querySelector('#ar-result');
+      const status = root.querySelector('#ar-status');
+      const nextButton = root.querySelector('#ar-next');
+      const resetButton = root.querySelector('#ar-reset');
+      const sequence = ['The', 'movie', 'was', 'surprisingly', 'good', '.'];
+      const initialVisible = 3;
+      let step = Number(window.openai?.widgetState?.privateContent?.step ?? 0);
+      if (!Number.isInteger(step) || step < 0 || step > sequence.length - initialVisible) step = 0;
+
+      const save = () => {
+        if (window.openai?.setWidgetState) {
+          window.openai.setWidgetState({
+            modelContent: { autoregressiveStep: step },
+            privateContent: { step }
+          }).catch(() => {});
+        }
+      };
+
+      const draw = () => {
+        const visibleCount = initialVisible + step;
+        tokenBox.replaceChildren();
+        sequence.forEach((word, index) => {
+          const token = document.createElement('span');
+          token.className = 'token';
+          if (index >= visibleCount) token.classList.add('future');
+          if (step > 0 && index === visibleCount - 1) token.classList.add('target');
+          token.textContent = index < visibleCount ? word : '?';
+          tokenBox.appendChild(token);
+        });
+
+        if (visibleCount < sequence.length) {
+          result.innerHTML = `<strong>Next-token target: “${sequence[visibleCount]}”</strong>`;
+        } else {
+          result.innerHTML = '<strong>Sequence complete</strong>';
+        }
+        status.textContent = `Generation step ${step} of ${sequence.length - initialVisible}`;
+        nextButton.disabled = visibleCount >= sequence.length;
+      };
+
+      nextButton.addEventListener('click', () => {
+        if (initialVisible + step < sequence.length) {
+          step += 1;
+          draw();
+          save();
+        }
+      });
+
+      resetButton.addEventListener('click', () => {
+        step = 0;
+        draw();
+        save();
+      });
+
+      window.addEventListener('openai:set_globals', (event) => {
+        const savedStep = Number(event.detail?.globals?.widgetState?.privateContent?.step);
+        if (Number.isInteger(savedStep) && savedStep >= 0 && savedStep <= sequence.length - initialVisible) {
+          step = savedStep;
+          draw();
+        }
+      });
+
+      draw();
+    })();
+  </script>
+</div>
