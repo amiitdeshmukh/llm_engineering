@@ -1,0 +1,207 @@
+<div id="temperature-probability-explainer">
+  <style>
+    #temperature-probability-explainer {
+      color: var(--foreground);
+      font-family: inherit;
+      display: grid;
+      gap: 18px;
+    }
+    #temperature-probability-explainer h2,
+    #temperature-probability-explainer p {
+      margin: 0;
+    }
+    #temperature-probability-explainer .control-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: baseline;
+    }
+    #temperature-probability-explainer .control-head output {
+      font-weight: 500;
+    }
+    #temperature-probability-explainer .bars {
+      display: grid;
+      gap: 14px;
+    }
+    #temperature-probability-explainer .bar-row {
+      display: grid;
+      grid-template-columns: minmax(72px, 110px) 1fr 62px;
+      gap: 10px;
+      align-items: center;
+    }
+    #temperature-probability-explainer .token-name {
+      font-weight: 500;
+    }
+    #temperature-probability-explainer .track {
+      height: 22px;
+      background: color-mix(in srgb, var(--muted) 70%, transparent);
+      overflow: hidden;
+    }
+    #temperature-probability-explainer .bar {
+      height: 100%;
+      min-width: 2px;
+      background: var(--viz-series-1);
+      transition: width 180ms ease;
+    }
+    #temperature-probability-explainer .bar-row.sampled .bar {
+      background: var(--viz-series-2);
+    }
+    #temperature-probability-explainer .probability {
+      text-align: right;
+    }
+    #temperature-probability-explainer .summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    #temperature-probability-explainer .viz-stat-value {
+      margin-top: 4px;
+    }
+    #temperature-probability-explainer .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    #temperature-probability-explainer .sample-result {
+      color: var(--muted-foreground);
+    }
+    @media (max-width: 500px) {
+      #temperature-probability-explainer .summary {
+        grid-template-columns: 1fr;
+      }
+      #temperature-probability-explainer .bar-row {
+        grid-template-columns: 72px 1fr 54px;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #temperature-probability-explainer .bar {
+        transition: none;
+      }
+    }
+  </style>
+
+  <h2>Temperature reshapes the next-token lottery</h2>
+
+  <div>
+    <div class="control-head">
+      <label class="form-label" for="temperature-slider">Temperature</label>
+      <output class="tabular-nums" id="temperature-value" for="temperature-slider">1.00</output>
+    </div>
+    <input class="form-range" id="temperature-slider" type="range" min="0.15" max="2.5" step="0.05" value="1">
+  </div>
+
+  <div class="bars" id="temperature-bars" aria-live="polite">
+    <div class="bar-row" data-index="0">
+      <span class="token-name">Paris</span>
+      <div class="track"><div class="bar"></div></div>
+      <span class="probability tabular-nums"></span>
+    </div>
+    <div class="bar-row" data-index="1">
+      <span class="token-name">London</span>
+      <div class="track"><div class="bar"></div></div>
+      <span class="probability tabular-nums"></span>
+    </div>
+    <div class="bar-row" data-index="2">
+      <span class="token-name">Rome</span>
+      <div class="track"><div class="bar"></div></div>
+      <span class="probability tabular-nums"></span>
+    </div>
+  </div>
+
+  <div class="summary viz-grid">
+    <div class="card viz-stat">
+      <div class="text-muted">Paris : London odds</div>
+      <div class="viz-stat-value tabular-nums" id="odds-value"></div>
+    </div>
+    <div class="card viz-stat">
+      <div class="text-muted">Distribution entropy</div>
+      <div class="viz-stat-value tabular-nums" id="entropy-value"></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="sample-token" type="button">Draw one token</button>
+    <span class="sample-result" id="sample-result" aria-live="polite">No token drawn yet</span>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.getElementById('temperature-probability-explainer');
+      const slider = root.querySelector('#temperature-slider');
+      const temperatureValue = root.querySelector('#temperature-value');
+      const rows = [...root.querySelectorAll('.bar-row')];
+      const oddsValue = root.querySelector('#odds-value');
+      const entropyValue = root.querySelector('#entropy-value');
+      const sampleButton = root.querySelector('#sample-token');
+      const sampleResult = root.querySelector('#sample-result');
+      const tokens = ['Paris', 'London', 'Rome'];
+      const baseProbabilities = [0.7, 0.2, 0.1];
+      let probabilities = [...baseProbabilities];
+      const savedTemperature = Number(window.openai?.widgetState?.privateContent?.temperature);
+      if (Number.isFinite(savedTemperature) && savedTemperature >= 0.15 && savedTemperature <= 2.5) {
+        slider.value = String(savedTemperature);
+      }
+
+      const distributionAt = (temperature) => {
+        const weights = baseProbabilities.map((probability) => probability ** (1 / temperature));
+        const total = weights.reduce((sum, weight) => sum + weight, 0);
+        return weights.map((weight) => weight / total);
+      };
+
+      const save = () => {
+        if (window.openai?.setWidgetState) {
+          const temperature = Number(slider.value);
+          window.openai.setWidgetState({
+            modelContent: { temperature },
+            privateContent: { temperature }
+          }).catch(() => {});
+        }
+      };
+
+      const draw = () => {
+        const temperature = Number(slider.value);
+        probabilities = distributionAt(temperature);
+        temperatureValue.textContent = temperature.toFixed(2);
+        rows.forEach((row, index) => {
+          row.querySelector('.bar').style.width = `${probabilities[index] * 100}%`;
+          row.querySelector('.probability').textContent = `${(probabilities[index] * 100).toFixed(1)}%`;
+          row.classList.remove('sampled');
+        });
+        const odds = probabilities[0] / probabilities[1];
+        const entropy = -probabilities.reduce((sum, probability) => sum + probability * Math.log2(probability), 0);
+        oddsValue.textContent = `${odds.toFixed(2)} : 1`;
+        entropyValue.textContent = `${entropy.toFixed(3)} bits`;
+        sampleResult.textContent = 'No token drawn yet';
+      };
+
+      slider.addEventListener('input', draw);
+      slider.addEventListener('change', save);
+
+      sampleButton.addEventListener('click', () => {
+        const random = Math.random();
+        let cumulative = 0;
+        let selected = probabilities.length - 1;
+        for (let index = 0; index < probabilities.length; index += 1) {
+          cumulative += probabilities[index];
+          if (random < cumulative) {
+            selected = index;
+            break;
+          }
+        }
+        rows.forEach((row, index) => row.classList.toggle('sampled', index === selected));
+        sampleResult.textContent = `Sampled token: ${tokens[selected]}`;
+      });
+
+      window.addEventListener('openai:set_globals', (event) => {
+        const temperature = Number(event.detail?.globals?.widgetState?.privateContent?.temperature);
+        if (Number.isFinite(temperature) && temperature >= 0.15 && temperature <= 2.5) {
+          slider.value = String(temperature);
+          draw();
+        }
+      });
+
+      draw();
+    })();
+  </script>
+</div>
