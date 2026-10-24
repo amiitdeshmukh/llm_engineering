@@ -305,6 +305,16 @@ time.
 `global_step` counts optimizer updates. It does not count individual examples,
 tokens, or physical batches.
 
+For this QLoRA training, the clearest definition is:
+
+```text
+ONE GLOBAL STEP = ONE LoRA ADAPTER UPDATE
+```
+
+At one global step, AdamW updates all trainable LoRA A and B matrices using
+the gradients accumulated since the previous global step. The original Qwen
+weights remain frozen.
+
 With the training configuration:
 
 ```text

@@ -733,7 +733,31 @@ completion tokens.
 The forward pass produced the loss. Backpropagation calculates how that loss
 would change if each trainable LoRA parameter changed.
 
-The calculated value for one trainable parameter is its gradient.
+The loss is one number, but the adapter contains many trainable numbers. For
+every trainable number `theta`, PyTorch calculates:
+
+```text
+gradient = change in loss / change in theta
+```
+
+This derivative is commonly written as:
+
+```text
+dL/dtheta
+```
+
+It answers a precise numerical question:
+
+```text
+If this LoRA parameter changed slightly, how would the loss change?
+```
+
+The gradient has a sign and a magnitude:
+
+```text
+positive or negative sign -> contributes to the update direction
+magnitude                 -> strength of the current update signal
+```
 
 Backpropagation follows the calculations in reverse order:
 
@@ -747,7 +771,83 @@ loss
 -> LoRA parameters in targeted projections
 ```
 
-## 33. Frozen weights still participate in backpropagation
+PyTorch recorded how tensors were produced during the forward pass. This
+record is called the computation graph. During `loss.backward()`, PyTorch
+uses the chain rule to move backward through that graph and calculate
+gradients.
+
+Gradient checkpointing may discard some forward activations to save memory.
+When backward needs them, PyTorch recalculates those forward operations. This
+changes memory use and speed, but not the gradient mathematics.
+
+## 33. Calculate gradients for real LoRA matrices
+
+One LoRA-equipped projection calculates:
+
+```text
+y = W(x) + scale * B(A(x))
+```
+
+Where:
+
+```text
+x -> projection input
+W -> frozen original Qwen matrix
+A -> first trainable LoRA matrix
+B -> second trainable LoRA matrix
+y -> projection output
+```
+
+Backpropagation arrives at this projection with an upstream gradient. That
+gradient describes how the final loss depends on `y`.
+
+PyTorch then calculates two sets of LoRA gradients:
+
+```text
+dL/dB -> one gradient for every number in B
+dL/dA -> one gradient for every number in A
+```
+
+Conceptually:
+
+```text
+B gradients depend on:
+    the upstream gradient
+    and the intermediate result A(x)
+
+A gradients depend on:
+    the upstream gradient
+    the B matrix
+    and the original input x
+```
+
+The tensor formulas can be written as:
+
+```text
+dL/dB = scale * upstream_gradient * transpose(A(x))
+
+dL/dA = scale * transpose(B) * upstream_gradient * transpose(x)
+```
+
+PyTorch performs these calculations across every relevant token and every
+example in the physical batch. Contributions from those positions are
+combined into gradient tensors with the same shapes as A and B.
+
+The lite adapter places LoRA in q, k, v, and o projections across 36 layers.
+With rank 32, this creates approximately 14.7 million trainable LoRA
+parameters. Backpropagation calculates a gradient for each of those trainable
+numbers.
+
+The trainable matrices are not updated one layer at a time. Backpropagation
+first calculates gradients throughout the network. Later, the optimizer
+updates all trainable LoRA matrices as part of one optimizer step.
+
+By default, PEFT initializes one LoRA matrix with usable starting values and
+the other so the initial LoRA adjustment is zero. Therefore, attaching a new
+adapter initially preserves the base model's result. Training then moves the
+LoRA matrices away from that initial state.
+
+## 34. Frozen weights still participate in backpropagation
 
 The original Qwen weights are used in the forward calculations. During
 backpropagation, the program passes gradient information through operations
@@ -762,7 +862,13 @@ LoRA A/B weights      -> gradients stored, optimizer updates allowed
 
 The base weights participate in calculation without being modified.
 
-## 34. LoRA dropout during training
+The frozen matrices still affect LoRA gradients. For example, gradient
+information may need to pass backward through a frozen projection to reach a
+LoRA module in an earlier Transformer layer. PyTorch calculates the necessary
+gradient with respect to intermediate activations without creating an
+optimizer update for the frozen matrix itself.
+
+## 35. LoRA dropout during training
 
 The configuration uses:
 
@@ -775,7 +881,7 @@ that pass. This changes which LoRA inputs are active from one pass to another.
 
 LoRA dropout is disabled during evaluation and inference.
 
-## 35. Finish one physical batch
+## 36. Finish one physical batch
 
 After one physical batch of 16 examples:
 
@@ -787,7 +893,18 @@ Backward pass -> LoRA gradients
 The experiment uses four gradient-accumulation steps. The optimizer does not
 update LoRA yet after the first physical batch.
 
-## 36. Accumulate four physical batches
+The newly calculated gradients are stored in each trainable parameter's
+`.grad` field. For example:
+
+```text
+LoRA parameter value -> parameter.data
+Current gradient     -> parameter.grad
+```
+
+The gradient and parameter value are separate. Calculating a gradient does
+not immediately change the parameter.
+
+## 37. Accumulate four physical batches
 
 The sequence is:
 
@@ -797,6 +914,23 @@ Physical batch 2: calculate and add LoRA gradients
 Physical batch 3: calculate and add LoRA gradients
 Physical batch 4: calculate and add LoRA gradients
 ```
+
+PyTorch backward operations add into `.grad`; they do not automatically
+replace an existing gradient. That behaviour makes accumulation possible:
+
+```text
+stored gradient after batch 1 = gradient from batch 1
+
+stored gradient after batch 2 =
+    batch 1 contribution + batch 2 contribution
+
+stored gradient after batch 4 =
+    contributions from batches 1, 2, 3, and 4
+```
+
+The trainer normalizes the loss/gradients so the update represents the
+effective batch instead of becoming four times larger merely because four
+batches were accumulated.
 
 Each batch contains 16 examples, so one optimizer update receives information
 from approximately:
@@ -810,7 +944,10 @@ This is the effective batch size.
 Only one physical batch's forward-pass activations need to exist at a time.
 Accumulated gradients remain until the optimizer update.
 
-## 37. Calculate and clip the gradient norm
+No LoRA matrix value has changed during these four backward passes yet. Only
+the stored `.grad` tensors have been built up.
+
+## 38. Calculate and clip the gradient norm
 
 The trainer calculates one summary magnitude for all trainable gradients. This
 is the gradient norm.
@@ -827,7 +964,10 @@ before the update. This is gradient clipping.
 The logged gradient norm can show the value measured before clipping, so it
 can be larger than `0.3`.
 
-## 38. Update LoRA with AdamW
+If clipping is needed, every gradient is scaled by a related factor so their
+combined direction is preserved while their total magnitude is limited.
+
+## 39. Update LoRA with AdamW
 
 After four accumulated physical batches, AdamW updates every trainable LoRA
 parameter.
@@ -842,14 +982,71 @@ AdamW also uses moving histories of gradients and squared gradients, plus
 weight decay. Therefore, the real update contains more calculations than this
 simplified expression.
 
-Only LoRA matrices are updated. Original Qwen matrices remain unchanged.
-
-## 39. Increase global step
-
-After the optimizer update:
+For each trainable LoRA parameter, AdamW stores two optimizer-state values:
 
 ```text
-global_step increases by 1
+m -> moving average of recent gradients
+v -> moving average of recent squared gradients
+```
+
+At one optimizer step, AdamW approximately performs:
+
+```text
+1. Read the accumulated gradient g.
+2. Update m using g.
+3. Update v using g squared.
+4. Correct the early-step bias in m and v.
+5. Use m, v, epsilon, and the current learning rate to calculate an update.
+6. Apply decoupled weight decay.
+7. Write the new LoRA parameter value.
+```
+
+A simplified AdamW expression is:
+
+```text
+m = beta1 * old_m + (1 - beta1) * gradient
+v = beta2 * old_v + (1 - beta2) * gradient^2
+
+new parameter =
+    old parameter
+    - learning_rate * adjusted_m / (sqrt(adjusted_v) + epsilon)
+    - learning_rate * weight_decay * old parameter
+```
+
+The update is applied across all trainable A and B matrices in all targeted
+projections. Although operations execute in an order on the device, they form
+one logical optimizer update based on the gradients collected for the current
+effective batch.
+
+Only LoRA matrices are updated. Original Qwen matrices remain unchanged.
+
+## 40. Global step means LoRA was updated
+
+This is the simplest correct meaning for this training run:
+
+```text
+ONE GLOBAL STEP = ONE LoRA ADAPTER UPDATE
+```
+
+More precisely, one global step means that AdamW completed one optimizer
+update across all trainable LoRA A and B matrices.
+
+The sequence is:
+
+```text
+4 physical batches finish forward and backward passes
+-> accumulated LoRA gradients are ready
+-> gradients are clipped if necessary
+-> AdamW updates every trainable LoRA matrix
+-> global_step increases by 1
+```
+
+Therefore:
+
+```text
+global step 1  -> LoRA has been updated once
+global step 2  -> LoRA has been updated twice
+global step 16 -> LoRA has been updated sixteen times
 ```
 
 With 1,000 examples and an effective batch size of 64:
@@ -860,7 +1057,14 @@ With 1,000 examples and an effective batch size of 64:
 
 This produced the `0/16` to `16/16` progress bar.
 
-## 40. Update the learning rate
+An individual forward pass is not a global step. An individual backward pass
+is not a global step. They calculate and collect information needed for the
+later optimizer update.
+
+Validation and inference also run forward passes, but they never increase
+global step because no optimizer update occurs.
+
+## 41. Update the learning rate
 
 The learning-rate scheduler changes the learning rate after optimizer updates.
 
@@ -875,7 +1079,9 @@ start small
 The logged learning rates decreased during the short run because the complete
 schedule was compressed into only 16 optimizer updates.
 
-## 41. Clear gradients
+The updated learning rate will be used for the next optimizer update.
+
+## 42. Clear gradients
 
 After the optimizer update, accumulated gradients are cleared. The next group
 of four physical batches starts with new gradients.
@@ -888,10 +1094,25 @@ four forward/backward passes
 -> update LoRA
 -> update learning rate
 -> clear gradients
--> increase global step
+-> record that one global step has completed
 ```
 
-## 42. Complete one epoch
+Clearing gradients is essential. Without it, gradients from the next effective
+batch would continue adding to gradients from the previous global step.
+
+Gradient clearing does not undo the LoRA update. It clears `.grad`, while the
+new trained values remain in the LoRA parameters themselves.
+
+The state after one global step is:
+
+```text
+LoRA parameter.data -> contains newly updated adapter values
+LoRA parameter.grad -> cleared before the next accumulation cycle
+Original Qwen data  -> unchanged
+global_step         -> increased by 1
+```
+
+## 43. Complete one epoch
 
 One epoch is complete after all selected training examples have been
 processed once.
@@ -907,7 +1128,7 @@ Global steps: 16
 If three epochs are configured, the same training split is processed three
 times, with LoRA continuing from its parameters learned in earlier epochs.
 
-## 43. Run validation
+## 44. Run validation
 
 Validation uses a separate dataset split that does not update LoRA.
 
@@ -923,7 +1144,7 @@ LoRA parameters do not change
 The trainer calculates validation loss, token accuracy, and entropy. These
 metrics show how the current adapter performs on examples it did not train on.
 
-## 44. Save the adapter
+## 45. Save the adapter
 
 After training, PEFT saves files such as:
 
@@ -938,7 +1159,7 @@ complete second copy of all Qwen parameters.
 That is why the trained adapter was about 29.5 MB while the base model contains
 billions of parameters.
 
-## 45. Load the trained adapter later
+## 46. Load the trained adapter later
 
 When Transformers receives the adapter repository, it finds
 `adapter_config.json`. That configuration names the original base model.
@@ -952,7 +1173,7 @@ Transformers then:
 
 The base and adapter weights remain logically separate.
 
-## 46. Send a new prompt after training
+## 47. Send a new prompt after training
 
 During inference, only the prompt is supplied:
 
@@ -976,7 +1197,7 @@ final projection result = original result + trained LoRA adjustment
 LoRA is active inside the projections. It is not applied once before the base
 model or once after the base model.
 
-## 47. Generate one token
+## 48. Generate one token
 
 After the final layer, Qwen produces 151,936 next-token scores. Generation
 selects a token according to its generation settings.
@@ -995,7 +1216,7 @@ or
 max_new_tokens is reached
 ```
 
-## 48. The complete training flow
+## 49. The complete training flow
 
 ```text
 Prompt and completion
@@ -1020,7 +1241,7 @@ Prompt and completion
 -> save adapter
 ```
 
-## 49. The central QLoRA facts
+## 50. The central QLoRA facts
 
 ```text
 The base Qwen weights are loaded in compressed 4-bit form.
