@@ -30,3 +30,8 @@ def hello_europe() -> str:
     data = response.json()
     city, region, country = data["city"], data["region"], data["country"]
     return f"Hello from {city}, {region}, {country}!!"
+
+if __name__ == "__main__":
+    with app.run():
+        reply = hello.remote()
+        print(reply)
