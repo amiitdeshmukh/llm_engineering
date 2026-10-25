@@ -15,13 +15,13 @@ secrets = [modal.Secret.from_name("huggingface-secret")]
 # Constants
 
 GPU = "T4"
-BASE_MODEL = "meta-llama/Llama-3.2-3B"
+BASE_MODEL = "Qwen/Qwen2.5-3B-Instruct"
 PROJECT_NAME = "price"
-HF_USER = "ed-donner"  # your HF name here! Or use mine if you just want to reproduce my results.
-RUN_NAME = "2025-11-28_18.47.07"
-PROJECT_RUN_NAME = f"{PROJECT_NAME}-{RUN_NAME}"
+HF_USER = "amitdeshmukh"  # your HF name here! Or use mine if you just want to reproduce my results.
+# RUN_NAME = "2025-11-28_18.47.07"
+# PROJECT_RUN_NAME = f"{PROJECT_NAME}-{RUN_NAME}"
 REVISION = "b19c8bfea3b6ff62237fbb0a8da9779fc12cefbd"
-FINETUNED_MODEL = f"{HF_USER}/{PROJECT_RUN_NAME}"
+FINETUNED_MODEL = f"amitdeshmukh/price-2026-10-24_17.16.25-lite"
 
 
 @app.function(image=image, secrets=secrets, gpu=GPU, timeout=1800)
@@ -54,7 +54,7 @@ def price(description: str) -> float:
         BASE_MODEL, quantization_config=quant_config, device_map="auto"
     )
 
-    fine_tuned_model = PeftModel.from_pretrained(base_model, FINETUNED_MODEL, revision=REVISION)
+    fine_tuned_model = PeftModel.from_pretrained(base_model, FINETUNED_MODEL,)
 
     set_seed(42)
     inputs = tokenizer.encode(prompt, return_tensors="pt").to("cuda")

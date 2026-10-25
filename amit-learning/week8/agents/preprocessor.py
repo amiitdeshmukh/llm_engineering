@@ -4,7 +4,7 @@ import os
 
 load_dotenv(override=True)
 
-DEFAULT_MODEL_NAME = os.getenv("PRICER_PREPROCESSOR_MODEL", "ollama/llama3.2")
+DEFAULT_MODEL_NAME = os.getenv("PRICER_PREPROCESSOR_MODEL", "gpt-6-luna")
 DEFAULT_REASONING_EFFORT = "low" if "gpt-oss" in DEFAULT_MODEL_NAME else None
 
 SYSTEM_PROMPT = """Create a concise description of a product. Respond only in this format. Do not include part numbers.
@@ -19,8 +19,8 @@ class Preprocessor:
     def __init__(
         self,
         model_name=DEFAULT_MODEL_NAME,
-        reasoning_effort=DEFAULT_REASONING_EFFORT,
-        base_url=None,
+        reasoning_effort="low",
+        base_url="https://api.openai.com/v1",
     ):
         self.total_input_tokens = 0
         self.total_output_tokens = 0
